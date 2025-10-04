@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>✨ Phrase Guess Duel ✨</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <style>
+    :root {
+      --main-bg: linear-gradient(135deg, #3a0ca3, #7209b7, #f72585);
+      --text-light: #f1f1f1;
+      --accent: #ffb703;
+      --correct: #06d6a0;
+      --wrong: #ef233c;
+      --glow: 0 0 12px rgba(255,255,255,0.4);
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--main-bg);
+      color: var(--text-light);
+      font-family: "Poppins", sans-serif;
+      text-align: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      letter-spacing: 2px;
+      margin: 20px 0;
+      text-shadow: var(--glow);
+    }
+
+    #nickname {
+      position: absolute;
+      top: 15px;
+      right: 25px;
+      font-weight: bold;
+      color: var(--accent);
+      text-shadow: var(--glow);
+    }
+
+    #scores {
+      background: rgba(255,255,255,0.15);
+      padding: 10px 20px;
+      border-radius: 20px;
+      width: fit-content;
+      margin: 10px auto;
+      backdrop-filter: blur(10px);
+      font-size: 1.1rem;
+    }
+
+    #msg {
+      font-size: 1.3rem;
+      margin-top: 10px;
+      animation: fadeIn 0.5s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .phrase {
+      font-size: 2rem;
+      letter-spacing: 6px;
+      margin-top: 30px;
+      background: rgba(255,255,255,0.1);
+      display: inline-block;
+      padding: 15px 25px;
+      border-radius: 20px;
+      box-shadow: var(--glow);
+      min-width: 250px;
+    }
+
+    #giverPhrase {
+      font-size: 1.1rem;
+      margin: 15px;
+      color: #ffe;
+      opacity: 0.9;
+    }
+
+    .input-box {
+      margin-top: 20px;
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    input {
+      font-size: 1.1rem;
+      padding: 10px 15px;
+      border-radius: 10px;
+      border: none;
+      outline: none;
+    }
+
+    button {
+      font-size: 1.1rem;
+      padding: 10px 15px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      background: var(--accent);
+      color: #111;
+      font-weight: bold;
+      transition: 0.2s;
+    }
+    button:hover { transform: scale(1.05); }
+
+    #wrongGuesses {
+      margin: 20px auto;
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      max-width: 600px;
+    }
+
+    .chip {
+      background: rgba(255,0,0,0.7);
+      padding: 6px 12px;
+      border-radius: 15px;
+      font-weight: bold;
+      animation: popIn 0.3s ease;
+    }
+
+    @keyframes popIn {
+      from { transform: scale(0); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    #tries {
+      font-weight: bold;
+      font-size: 1.2rem;
+      margin-top: 10px;
+    }
+
+    #countdown {
+      font-size: 1.8rem;
+      color: var(--accent);
+      margin-top: 20px;
+      display: none;
+    }
+
+    #role {
+      position: absolute;
+      top: 15px;
+      left: 25px;
+      padding: 5px 15px;
+      border-radius: 15px;
+      font-weight: bold;
+      background: rgba(255,255,255,0.2);
+      text-shadow: var(--glow);
+    }
+
+    #nicknameDiv {
+      margin-top: 100px;
+    }
+  </style>
+</head>
+<body>
+  <div id="role"></div>
+  <div id="nickname"></div>
+  <h1>✨ Phrase Guess Duel ✨</h1>
+
+  <div id="scores">Scores - Player 1: 0 | Player 2: 0</div>
+  <div id="msg">Waiting for players...</div>
+
+  <div id="tries">Tries left: 9</div>
+  <div id="giverPhrase"></div>
+  <div id="phrase" class="phrase"></div>
+
+  <div id="wrongGuesses"></div>
+  <div id="countdown">Next round starting in 5...</div>
+
+  <!-- Nickname -->
+  <div id="nicknameDiv">
+    <input id="nicknameInput" placeholder="Enter your nickname" />
+    <button onclick="sendNickname()">Join</button>
+  </div>
+
+  <!-- Phrase input -->
+  <div id="giver" class="input-box" style="display:none;">
+    <input id="phraseInput" placeholder="Enter a phrase..." />
+    <button onclick="sendPhrase()">Submit</button>
+  </div>
+
+  <!-- Guess input -->
+  <div id="guesser" class="input-box" style="display:none;">
+    <input id="letterInput" maxlength="1" placeholder="Enter a letter" />
+    <button onclick="guessLetter()">Guess</button>
+  </div>
+
+  <script>
+    const socket = io();
+    let playerNumber = 0, nickname = "";
+
+    socket.on("player_number", n => playerNumber = n);
+    socket.on("message", msg => document.getElementById("msg").innerText = msg);
+    socket.on("display_phrase", p => document.getElementById("phrase").innerText = p);
+    socket.on("update_tries", t => document.getElementById("tries").innerText = `Tries left: ${t}`);
+    socket.on("scores", s => document.getElementById("scores").innerText = `Scores - P1: ${s.p1} | P2: ${s.p2}`);
+
+    socket.on("wrong_guess", letters => {
+      const area = document.getElementById("wrongGuesses");
+      area.innerHTML = "";
+      letters.forEach(l => {
+        const chip = document.createElement("div");
+        chip.className = "chip";
+        chip.innerText = l.toUpperCase();
+        area.appendChild(chip);
+      });
+    });
+
+    socket.on("show_phrase_input", () => {
+      document.getElementById("giver").style.display = "flex";
+      document.getElementById("guesser").style.display = "none";
+      setRole("Giver", "#ffb703");
+    });
+
+    socket.on("show_guess_input", () => {
+      document.getElementById("guesser").style.display = "flex";
+      document.getElementById("giver").style.display = "none";
+      setRole("Guesser", "#06d6a0");
+    });
+
+    socket.on("show_giver_phrase", p => document.getElementById("giverPhrase").innerText = "Your phrase: " + p);
+    socket.on("reveal_phrase", p => document.getElementById("phrase").innerText = `❗ The phrase was: "${p}"`);
+    socket.on("clear_giver_phrase", () => document.getElementById("giverPhrase").innerText = "");
+
+    socket.on("next_round_countdown", () => {
+      const countdown = document.getElementById("countdown");
+      countdown.style.display = "block";
+      let time = 5;
+      countdown.innerText = `Next round in ${time}...`;
+      const timer = setInterval(() => {
+        time--;
+        countdown.innerText = `Next round in ${time}...`;
+        if (time <= 0) {
+          clearInterval(timer);
+          countdown.style.display = "none";
+        }
+      }, 1000);
+    });
+
+    function setRole(role, color) {
+      const el = document.getElementById("role");
+      el.innerText = role;
+      el.style.background = color;
+    }
+
+    function sendNickname() {
+      nickname = document.getElementById("nicknameInput").value.trim();
+      if (!nickname) return;
+      socket.emit("set_nickname", { nickname });
+      document.getElementById("nicknameDiv").style.display = "none";
+      document.getElementById("nickname").innerText = nickname;
+    }
+
+    function sendPhrase() {
+      const phrase = document.getElementById("phraseInput").value.trim();
+      if (!phrase) return;
+      socket.emit("set_phrase", { phrase });
+      document.getElementById("phraseInput").value = "";
+      document.getElementById("giver").style.display = "none";
+    }
+
+    function guessLetter() {
+      const letter = document.getElementById("letterInput").value.trim();
+      if (!letter) return;
+      socket.emit("guess_letter", { letter });
+      document.getElementById("letterInput").value = "";
+    }
+
+    // ENTER key shortcuts
+    document.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        if (document.getElementById("nicknameDiv").style.display !== "none") sendNickname();
+        else if (document.getElementById("giver").style.display !== "none") sendPhrase();
+        else if (document.getElementById("guesser").style.display !== "none") guessLetter();
+      }
+    });
+  </script>
+</body>
+</html>
